@@ -1,7 +1,8 @@
 module.exports = {
-  appId: 'com.example.myconverter',
-  productName: 'My Converter',
+  appId: 'com.nikhilrathore.fluxconverter',
+  productName: 'Flux Converter',
   directories: {
+    buildResources: 'build',
     output: 'release'
   },
   files: [
@@ -21,7 +22,7 @@ module.exports = {
   // Actual native artifacts still require building on their respective OS environments.
   win: {
     target: ['nsis'],
-    icon: 'build/icon.ico',
+    icon: 'node_modules/app-builder-lib/templates/icons/proton-native/proton-native.ico',
     signAndEditExecutable: false,
     verifyUpdateCodeSignature: false
   },
@@ -37,6 +38,9 @@ module.exports = {
   },
   nsis: {
     oneClick: false,
-    allowToChangeInstallationDirectory: true
+    allowToChangeInstallationDirectory: true,
+    installerIcon: 'node_modules/app-builder-lib/templates/icons/proton-native/proton-native.ico',
+    uninstallerIcon: 'node_modules/app-builder-lib/templates/icons/proton-native/proton-native.ico',
+    installerHeaderIcon: 'node_modules/app-builder-lib/templates/icons/proton-native/proton-native.ico'
   }
 };
