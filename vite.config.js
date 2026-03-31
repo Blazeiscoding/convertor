@@ -5,6 +5,7 @@ const tailwindcss = require('@tailwindcss/vite').default;
 
 module.exports = defineConfig({
   root: '.',
+  base: './',
   publicDir: false,
   plugins: [react(), tailwindcss()],
   server: {
