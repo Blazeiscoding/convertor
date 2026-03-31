@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Flux Converter is a desktop app for fast offline image and video conversion with local FFmpeg processing."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>Flux Converter</title>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="#home">
+          <span class="brand__mark">F</span>
+          <span>Flux Converter</span>
+        </a>
+        <nav class="topbar__nav">
+          <a href="#features">Features</a>
+          <a href="#workflow">Workflow</a>
+          <a href="#formats">Formats</a>
+          <a href="#download">Download</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero" id="home">
+          <div class="hero__copy">
+            <p class="eyebrow">Desktop media conversion, without the cloud</p>
+            <h1>Convert images and videos locally with a queue that stays fast, clear, and offline.</h1>
+            <p class="hero__body">
+              Flux Converter packages FFmpeg into a native desktop workflow for Windows, macOS, and Linux. Drop files in, choose output formats, run conversions in parallel, and keep everything on your machine.
+            </p>
+
+            <div class="hero__actions">
+              <a class="button button--primary" href="#download">Get the app</a>
+              <a class="button button--secondary" href="#workflow">See how it works</a>
+            </div>
+
+            <div class="hero__meta">
+              <div>
+                <strong>Offline by default</strong>
+                <span>No uploads, subscriptions, or web dependencies.</span>
+              </div>
+              <div>
+                <strong>GPU aware</strong>
+                <span>Uses hardware acceleration when supported.</span>
+              </div>
+              <div>
+                <strong>Cross-platform</strong>
+                <span>Packaged for desktop installers, not browser tabs.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="hero__visual">
+            <div class="product-window">
+              <div class="product-window__chrome">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <div class="product-window__content">
+                <div class="product-window__headline">
+                  <div>
+                    <p class="window-label">Flux workspace</p>
+                    <h2>Batch conversion with fewer moving parts.</h2>
+                  </div>
+                  <div class="window-stats">
+                    <span>12 ready</span>
+                    <span>3 processing</span>
+                    <span>98 done</span>
+                  </div>
+                </div>
+
+                <div class="drop-card">
+                  <div class="drop-card__icon">+</div>
+                  <div>
+                    <strong>Drop files to start</strong>
+                    <p>Images and videos stay local while FFprobe validates formats and the queue prepares jobs.</p>
+                  </div>
+                </div>
+
+                <div class="queue-card">
+                  <div class="queue-row">
+                    <div>
+                      <strong>campaign-cut.mov</strong>
+                      <span>Video to WebM</span>
+                    </div>
+                    <em>Queued</em>
+                  </div>
+                  <div class="queue-row">
+                    <div>
+                      <strong>product-shot.png</strong>
+                      <span>Image to AVIF</span>
+                    </div>
+                    <em>Ready</em>
+                  </div>
+                  <div class="queue-row queue-row--done">
+                    <div>
+                      <strong>launch-trailer.mp4</strong>
+                      <span>Saved to recent activity</span>
+                    </div>
+                    <em>Done</em>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="feature-grid" id="features">
+          <article class="feature-card">
+            <p class="feature-card__index">01</p>
+            <h3>One queue for images and video</h3>
+            <p>Manage JPG, PNG, WebP, AVIF, MP4, WebM, MKV, MOV and more from one compact workspace.</p>
+          </article>
+          <article class="feature-card">
+            <p class="feature-card__index">02</p>
+            <h3>Local FFmpeg with sensible defaults</h3>
+            <p>Bundled binaries, output presets, and persistent settings reduce setup friction and repetitive clicks.</p>
+          </article>
+          <article class="feature-card">
+            <p class="feature-card__index">03</p>
+            <h3>Retry, clear, and inspect history</h3>
+            <p>Completed work moves out of the active queue automatically so the current batch remains readable.</p>
+          </article>
+        </section>
+
+        <section class="split-section" id="workflow">
+          <div class="section-heading">
+            <p class="eyebrow">Workflow</p>
+            <h2>Built for a short path from import to export.</h2>
+            <p>
+              Flux keeps the workflow direct: select files, confirm output, queue conversions, and reveal finished media without bouncing through separate tools.
+            </p>
+          </div>
+
+          <div class="workflow-list">
+            <div class="workflow-step">
+              <span>01</span>
+              <div>
+                <strong>Add files</strong>
+                <p>Use drag and drop or the native file picker.</p>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <span>02</span>
+              <div>
+                <strong>Probe and validate</strong>
+                <p>FFprobe checks supported media before the queue starts.</p>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <span>03</span>
+              <div>
+                <strong>Queue in parallel</strong>
+                <p>Set concurrency from one to four simultaneous jobs.</p>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <span>04</span>
+              <div>
+                <strong>Reveal output</strong>
+                <p>Open finished files directly from recent activity.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="formats-section" id="formats">
+          <div class="section-heading">
+            <p class="eyebrow">Supported formats</p>
+            <h2>Common formats in, practical formats out.</h2>
+          </div>
+
+          <div class="format-columns">
+            <div class="format-card">
+              <h3>Input</h3>
+              <p>JPG, JPEG, PNG, WebP, AVIF, GIF, BMP, TIFF, MP4, WebM, MKV, MOV, AVI, M4V, MPG, MPEG</p>
+            </div>
+            <div class="format-card">
+              <h3>Output</h3>
+              <p>JPG, PNG, WebP, AVIF, GIF, BMP, TIFF, MP4, WebM, MKV, MOV, AVI, GIF</p>
+            </div>
+            <div class="format-card">
+              <h3>Acceleration</h3>
+              <p>NVIDIA NVENC, AMD AMF, Intel QSV, Apple VideoToolbox, and Windows Media Foundation when available.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="download-card" id="download">
+          <div>
+            <p class="eyebrow">Download</p>
+            <h2>Ship a desktop converter that looks finished.</h2>
+            <p>
+              Use this landing page as the marketing surface for the project and pair it with the packaged app artifacts in `release/`.
+            </p>
+          </div>
+          <div class="download-card__actions">
+            <a class="button button--primary" href="../release/">Open release folder</a>
+            <a class="button button--secondary" href="../README.md">Read setup notes</a>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
