@@ -750,3 +750,16 @@ select {
 .options-checkbox input {
   accent-color: var(--foreground);
 }
+
+.job-override {
+  border-top: 1px dashed var(--border);
+  padding-top: 0.9rem;
+}
+
+.job-override__panel {
+  margin-top: 0.85rem;
+  padding: 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(15, 23, 42, 0.18);
+}

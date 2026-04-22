@@ -129,8 +129,11 @@ function JobRow({
   job,
   isExpanded,
   formatOptions,
+  defaultOptions,
   onToggleExpanded,
   onFormatChange,
+  onOptionsChange,
+  onOptionsClear,
   onRevealOutput,
   onCopyPath,
   onCancelJob,
@@ -197,6 +200,15 @@ function JobRow({
                 <span className="queue-badge" style={badgeStyle(uiStatus)}>
                   {formatStatus(job.status)}
                 </span>
+                {job.optionsOverride ? (
+                  <span
+                    className="queue-badge"
+                    title="Custom encoding options for this file"
+                    style={{ background: 'rgba(125, 211, 252, 0.12)', color: '#7dd3fc', border: '1px solid rgba(125, 211, 252, 0.22)' }}
+                  >
+                    Custom
+                  </span>
+                ) : null}
               </div>
               <p className="mt-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
                 {formatMetadataLine(job)}
@@ -246,8 +258,11 @@ function JobRow({
         <div className="queue-row__details">
           <JobRowDetails
             job={job}
+            defaultOptions={defaultOptions}
             onRevealOutput={onRevealOutput}
             onCopyPath={onCopyPath}
+            onOptionsChange={onOptionsChange}
+            onOptionsClear={onOptionsClear}
             actions={actions}
           />
         </div>
@@ -261,8 +276,11 @@ export default function JobList({
   recentJobs,
   expandedRows,
   formatOptions,
+  defaultOptions,
   onToggleExpanded,
   onFormatChange,
+  onOptionsChange,
+  onOptionsClear,
   onRevealOutput,
   onCopyPath,
   onCancelJob,
@@ -286,8 +304,11 @@ export default function JobList({
               job={job}
               isExpanded={expandedRows.has(job.jobId || job.clientId)}
               formatOptions={formatOptions}
+              defaultOptions={defaultOptions}
               onToggleExpanded={onToggleExpanded}
               onFormatChange={onFormatChange}
+              onOptionsChange={onOptionsChange}
+              onOptionsClear={onOptionsClear}
               onRevealOutput={onRevealOutput}
               onCopyPath={onCopyPath}
               onCancelJob={onCancelJob}
@@ -307,8 +328,11 @@ export default function JobList({
               job={job}
               isExpanded={expandedRows.has(job.jobId || job.clientId)}
               formatOptions={formatOptions}
+              defaultOptions={defaultOptions}
               onToggleExpanded={onToggleExpanded}
               onFormatChange={onFormatChange}
+              onOptionsChange={onOptionsChange}
+              onOptionsClear={onOptionsClear}
               onRevealOutput={onRevealOutput}
               onCopyPath={onCopyPath}
               onCancelJob={onCancelJob}

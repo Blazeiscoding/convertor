@@ -41,7 +41,8 @@ function createDraftJob(file, defaultFormats) {
     progressMode: file.progressMode || 'indeterminate',
     duration: file.duration || null,
     dimensions: file.dimensions || null,
-    hasAudio: Boolean(file.hasAudio)
+    hasAudio: Boolean(file.hasAudio),
+    optionsOverride: file.optionsOverride || null
   };
 }
 
@@ -485,6 +486,22 @@ export default function App() {
     )));
   }
 
+  function handleJobOptionsChange(clientId, nextOverride) {
+    setJobs((currentJobs) => currentJobs.map((job) => (
+      job.clientId === clientId
+        ? { ...job, optionsOverride: nextOverride }
+        : job
+    )));
+  }
+
+  function handleJobOptionsClear(clientId) {
+    setJobs((currentJobs) => currentJobs.map((job) => (
+      job.clientId === clientId
+        ? { ...job, optionsOverride: null }
+        : job
+    )));
+  }
+
   async function handleRevealOutput(targetPath) {
     const response = await window.converter.openInFolder(targetPath);
 
@@ -635,7 +652,8 @@ export default function App() {
         files: draftJobs.map((job) => ({
           requestId: job.clientId,
           inputPath: job.inputPath,
-          outputFormat: job.outputFormat
+          outputFormat: job.outputFormat,
+          options: job.optionsOverride || undefined
         })),
         outputDir: selectedOutputDir || null
       });
@@ -796,8 +814,11 @@ export default function App() {
             recentJobs={visibleRecentJobs}
             expandedRows={expandedRows}
             formatOptions={supportedFormats}
+            defaultOptions={settings.defaultOptions || DEFAULT_JOB_OPTIONS}
             onToggleExpanded={toggleExpanded}
             onFormatChange={handleJobFormatChange}
+            onOptionsChange={handleJobOptionsChange}
+            onOptionsClear={handleJobOptionsClear}
             onRevealOutput={handleRevealOutput}
             onCopyPath={handleCopyPath}
             onCancelJob={handleCancelJob}
