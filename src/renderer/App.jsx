@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useState } from 'react';
+import BulkActionsBar from './components/BulkActionsBar';
 import DropZone from './components/DropZone';
 import FormatPicker from './components/FormatPicker';
 import JobList from './components/JobList';
@@ -138,6 +139,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState(() => new Set());
   const [queueScope, setQueueScope] = useState('all');
+  const [bulkScope, setBulkScope] = useState('all');
 
   const supportedFormats = useMemo(() => ({
     image: IMAGE_FORMATS,
@@ -502,6 +504,51 @@ export default function App() {
     )));
   }
 
+  function jobMatchesScope(job, scope) {
+    if (job.status !== 'pending-edit') return false;
+    if (scope === 'images') return job.detectedType === 'image';
+    if (scope === 'videos') return job.detectedType === 'video';
+    return true;
+  }
+
+  function handleBulkSetFormat(scope, outputFormat) {
+    setJobs((currentJobs) => currentJobs.map((job) => (
+      jobMatchesScope(job, scope) && supportedFormats[job.detectedType].includes(outputFormat)
+        ? { ...job, outputFormat }
+        : job
+    )));
+    pushToast('success', `Applied format ${outputFormat.toUpperCase()} to matching files.`);
+  }
+
+  function handleBulkSetQuality(scope, quality) {
+    setJobs((currentJobs) => currentJobs.map((job) => {
+      if (!jobMatchesScope(job, scope)) return job;
+      const base = job.optionsOverride || settings.defaultOptions || DEFAULT_JOB_OPTIONS;
+      return { ...job, optionsOverride: { ...base, quality } };
+    }));
+    pushToast('success', `Set quality preset to ${quality}.`);
+  }
+
+  function handleBulkSetResize(scope, resizePatch) {
+    setJobs((currentJobs) => currentJobs.map((job) => {
+      if (!jobMatchesScope(job, scope)) return job;
+      const base = job.optionsOverride || settings.defaultOptions || DEFAULT_JOB_OPTIONS;
+      const nextResize = { ...(base.resize || {}), ...resizePatch };
+      return { ...job, optionsOverride: { ...base, resize: nextResize } };
+    }));
+    pushToast('success', 'Updated resize for matching files.');
+  }
+
+  function handleBulkClearOverrides(scope) {
+    let cleared = 0;
+    setJobs((currentJobs) => currentJobs.map((job) => {
+      if (!jobMatchesScope(job, scope) || !job.optionsOverride) return job;
+      cleared += 1;
+      return { ...job, optionsOverride: null };
+    }));
+    pushToast('info', cleared > 0 ? `Cleared overrides on ${cleared} file${cleared === 1 ? '' : 's'}.` : 'No overrides to clear.');
+  }
+
   async function handleRevealOutput(targetPath) {
     const response = await window.converter.openInFolder(targetPath);
 
@@ -741,6 +788,15 @@ export default function App() {
   const visibleActiveJobs = queueScope === 'recent' ? [] : jobs;
   const visibleRecentJobs = queueScope === 'active' ? [] : recentJobs;
 
+  const bulkCounts = useMemo(() => {
+    const pending = jobs.filter((job) => job.status === 'pending-edit');
+    return {
+      images: pending.filter((job) => job.detectedType === 'image').length,
+      videos: pending.filter((job) => job.detectedType === 'video').length,
+      total: pending.length
+    };
+  }, [jobs]);
+
   return (
     <main className="app-shell">
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:px-6 lg:px-8">
@@ -808,6 +864,19 @@ export default function App() {
             onRemovePending={handleRemovePending}
             onClearHistory={handleClearHistory}
           />
+
+          {bulkCounts.total > 0 ? (
+            <BulkActionsBar
+              scope={bulkScope}
+              onScopeChange={setBulkScope}
+              counts={bulkCounts}
+              formatOptions={supportedFormats}
+              onSetFormat={handleBulkSetFormat}
+              onSetQuality={handleBulkSetQuality}
+              onSetResize={handleBulkSetResize}
+              onClearOverrides={handleBulkClearOverrides}
+            />
+          ) : null}
 
           <JobList
             activeJobs={visibleActiveJobs}
