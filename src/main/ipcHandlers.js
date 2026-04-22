@@ -6,11 +6,30 @@ const { dialog, ipcMain, shell } = require('electron/main');
 const { clipboard } = require('electron');
 const Store = require('electron-store').default;
 const { JobQueue } = require('./jobQueue');
-const { convertJob, cancelConversion, cleanupDirectoryArtifacts, probeMedia, detectHardwareAcceleration, getGpuCapabilities } = require('./converter');
+const {
+  convertJob,
+  cancelConversion,
+  cleanupDirectoryArtifacts,
+  probeMedia,
+  generateThumbnail,
+  detectHardwareAcceleration,
+  getGpuCapabilities,
+} = require('./converter');
+const {
+  DEFAULT_OPTIONS,
+  resolveOptions,
+  estimateOutputSize,
+} = require('./encoderOptions');
 
 const IMAGE_FORMATS = ['jpg', 'png', 'webp', 'avif', 'gif', 'bmp', 'tiff'];
 const VIDEO_FORMATS = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'gif'];
 const HISTORY_LIMIT = 100;
+
+// electron-store expects plain mutable JSON, not frozen objects.
+function cloneDefaultOptions() {
+  return JSON.parse(JSON.stringify(DEFAULT_OPTIONS));
+}
+
 const DEFAULT_SETTINGS = {
   defaultOutputDir: null,
   maxConcurrent: 1,
@@ -19,6 +38,7 @@ const DEFAULT_SETTINGS = {
     image: 'png',
     video: 'mp4'
   },
+  defaultOptions: cloneDefaultOptions(),
   recentJobs: []
 };
 
@@ -56,6 +76,10 @@ const store = new Store({
         }
       },
       default: DEFAULT_SETTINGS.defaultFormats
+    },
+    defaultOptions: {
+      type: 'object',
+      default: cloneDefaultOptions()
     },
     recentJobs: {
       type: 'array',
@@ -164,7 +188,9 @@ function summarizeHistoryJob(job) {
     duration: job.duration || null,
     dimensions: job.dimensions || null,
     hasAudio: Boolean(job.hasAudio),
+    options: job.options || null,
     errorMessage: job.errorMessage || null,
+    stderrTail: job.stderrTail || null,
     updatedAt: job.updatedAt || nowIso()
   };
 }
@@ -255,6 +281,33 @@ async function normalizeSelectedPaths(filePaths) {
   return normalized;
 }
 
+/**
+ * Merge global default options with per-job overrides.
+ * Deep-merge at the top level + `resize` + `video` + `video.audio`.
+ */
+function mergeWithDefaults(userOptions) {
+  const globalDefaults = store.get('defaultOptions') || DEFAULT_OPTIONS;
+  const user = userOptions && typeof userOptions === 'object' ? userOptions : {};
+
+  const merged = {
+    quality: user.quality ?? globalDefaults.quality,
+    resize: {
+      ...(globalDefaults.resize || {}),
+      ...(user.resize || {}),
+    },
+    video: {
+      ...(globalDefaults.video || {}),
+      ...(user.video || {}),
+      audio: {
+        ...((globalDefaults.video && globalDefaults.video.audio) || {}),
+        ...((user.video && user.video.audio) || {}),
+      },
+    },
+  };
+
+  return resolveOptions(merged);
+}
+
 async function createJobFromRequest(fileRequest, requestedOutputDir) {
   if (!fileRequest || typeof fileRequest !== 'object') {
     throw new Error('Invalid file entry.');
@@ -288,6 +341,8 @@ async function createJobFromRequest(fileRequest, requestedOutputDir) {
   const derivedOutputDir = requestedOutputDir || store.get('defaultOutputDir') || path.dirname(normalizedPath);
   await assertWritableDirectory(derivedOutputDir);
 
+  const resolvedOptions = mergeWithDefaults(fileRequest.options);
+
   return {
     jobId: randomUUID(),
     requestId: typeof fileRequest.requestId === 'string' ? fileRequest.requestId : randomUUID(),
@@ -303,7 +358,9 @@ async function createJobFromRequest(fileRequest, requestedOutputDir) {
     duration: probe.duration,
     dimensions: probe.dimensions,
     hasAudio: probe.hasAudio,
+    options: resolvedOptions,
     errorMessage: null,
+    stderrTail: null,
     updatedAt: nowIso()
   };
 }
@@ -392,18 +449,19 @@ function registerIpcHandlers({ getMainWindow }) {
 
       safeSend(getMainWindow, 'convert:done', { jobId, outputPath });
     },
-    onError: ({ jobId, message }) => {
+    onError: ({ jobId, message, stderrTail }) => {
       const job = knownJobs.get(jobId);
 
       if (job) {
         rememberJob({
           ...job,
           status: 'failed',
-          errorMessage: message
+          errorMessage: message,
+          stderrTail: stderrTail || null
         });
       }
 
-      safeSend(getMainWindow, 'convert:error', { jobId, message });
+      safeSend(getMainWindow, 'convert:error', { jobId, message, stderrTail: stderrTail || null });
     }
   });
 
@@ -413,6 +471,40 @@ function registerIpcHandlers({ getMainWindow }) {
       ok: true,
       files: await normalizeSelectedPaths(inputPaths)
     };
+  });
+
+  registerHandler('media:thumbnail', async (payload) => {
+    const inputPath = typeof payload?.inputPath === 'string' ? payload.inputPath : null;
+    const detectedType = payload?.detectedType || null;
+    if (!inputPath) {
+      return { ok: false, dataUri: null };
+    }
+    const effectiveType = detectedType || (await probeMedia(inputPath)).detectedType;
+    if (!effectiveType) {
+      return { ok: false, dataUri: null };
+    }
+    const dataUri = await generateThumbnail(inputPath, effectiveType);
+    return { ok: Boolean(dataUri), dataUri };
+  });
+
+  registerHandler('media:estimateSize', async (payload) => {
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const results = items.map((item) => {
+      try {
+        const probe = {
+          detectedType: item.detectedType,
+          duration: item.duration,
+          width: item.width || item?.dimensions?.width,
+          height: item.height || item?.dimensions?.height,
+        };
+        const resolved = mergeWithDefaults(item.options);
+        const bytes = estimateOutputSize(probe, resolved, item.outputFormat);
+        return { requestId: item.requestId, bytes };
+      } catch (error) {
+        return { requestId: item.requestId, bytes: null };
+      }
+    });
+    return { ok: true, estimates: results };
   });
 
   registerHandler('convert:start', async (payload) => {
@@ -546,7 +638,8 @@ function registerIpcHandlers({ getMainWindow }) {
         const job = await createJobFromRequest({
           requestId: randomUUID(),
           inputPath: entry.inputPath,
-          outputFormat: entry.outputFormat
+          outputFormat: entry.outputFormat,
+          options: entry.options || null
         }, entry.outputDir || null);
         jobs.push(job);
         rememberJob(job);
@@ -580,7 +673,8 @@ function registerIpcHandlers({ getMainWindow }) {
         defaultOutputDir: store.get('defaultOutputDir'),
         maxConcurrent: clampConcurrency(store.get('maxConcurrent')),
         useGpu: store.get('useGpu', true),
-        defaultFormats: store.get('defaultFormats')
+        defaultFormats: store.get('defaultFormats'),
+        defaultOptions: resolveOptions(store.get('defaultOptions') || DEFAULT_OPTIONS)
       },
       gpu: {
         available: caps.available,
@@ -599,7 +693,10 @@ function registerIpcHandlers({ getMainWindow }) {
       defaultFormats: {
         image: payload?.defaultFormats?.image || store.get('defaultFormats.image'),
         video: payload?.defaultFormats?.video || store.get('defaultFormats.video')
-      }
+      },
+      defaultOptions: payload?.defaultOptions
+        ? resolveOptions(payload.defaultOptions)
+        : resolveOptions(store.get('defaultOptions') || DEFAULT_OPTIONS)
     };
 
     if (nextSettings.defaultOutputDir) {
@@ -620,7 +717,8 @@ function registerIpcHandlers({ getMainWindow }) {
       defaultOutputDir: nextSettings.defaultOutputDir,
       maxConcurrent: nextSettings.maxConcurrent,
       useGpu: nextSettings.useGpu,
-      defaultFormats: nextSettings.defaultFormats
+      defaultFormats: nextSettings.defaultFormats,
+      defaultOptions: nextSettings.defaultOptions
     });
     queue.setConcurrency(nextSettings.maxConcurrent);
 

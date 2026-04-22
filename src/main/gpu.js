@@ -6,7 +6,7 @@
  * CPU codecs silently when no GPU is detected or when a test encode fails.
  */
 
-const { execFile } = require('node:child_process');
+const { execFile } = require("node:child_process");
 
 /** Probe result, populated once by `detectHardwareAcceleration`. */
 let cachedCapabilities = null;
@@ -19,12 +19,21 @@ let detectionPromise = null;
 function testEncoder(ffmpegPath, encoder, extraArgs = []) {
   return new Promise((resolve) => {
     const args = [
-      '-hide_banner', '-loglevel', 'error',
-      '-f', 'lavfi', '-i', 'color=c=black:s=256x256:d=0.1',
-      '-frames:v', '1',
-      '-c:v', encoder,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=black:s=256x256:d=0.1",
+      "-frames:v",
+      "1",
+      "-c:v",
+      encoder,
       ...extraArgs,
-      '-f', 'null', '-'
+      "-f",
+      "null",
+      "-",
     ];
 
     execFile(ffmpegPath, args, { timeout: 10000 }, (error) => {
@@ -47,31 +56,35 @@ async function detectHardwareAcceleration(ffmpegPath) {
   }
 
   const probes = [
-    { vendor: 'nvidia', encoder: 'h264_nvenc',  label: 'NVIDIA NVENC' },
-    { vendor: 'amd',    encoder: 'h264_amf',    label: 'AMD AMF' },
-    { vendor: 'intel',  encoder: 'h264_qsv',    label: 'Intel QSV' },
+    { vendor: "nvidia", encoder: "h264_nvenc", label: "NVIDIA NVENC" },
+    { vendor: "amd", encoder: "h264_amf", label: "AMD AMF" },
+    { vendor: "intel", encoder: "h264_qsv", label: "Intel QSV" },
   ];
 
-  if (process.platform === 'darwin') {
+  if (process.platform === "darwin") {
     probes.push({
-      vendor: 'apple',
-      encoder: 'h264_videotoolbox',
-      label: 'Apple VideoToolbox',
+      vendor: "apple",
+      encoder: "h264_videotoolbox",
+      label: "Apple VideoToolbox",
     });
   }
 
-  if (process.platform === 'win32') {
+  if (process.platform === "win32") {
     probes.push({
-      vendor: 'mediafoundation',
-      encoder: 'h264_mf',
-      label: 'Windows Media Foundation',
-      testArgs: ['-hw_encoding', '1'],
+      vendor: "mediafoundation",
+      encoder: "h264_mf",
+      label: "Windows Media Foundation",
+      testArgs: ["-hw_encoding", "1"],
     });
   }
 
   detectionPromise = (async () => {
     for (const probe of probes) {
-      const works = await testEncoder(ffmpegPath, probe.encoder, probe.testArgs);
+      const works = await testEncoder(
+        ffmpegPath,
+        probe.encoder,
+        probe.testArgs,
+      );
       if (works) {
         cachedCapabilities = {
           available: true,
@@ -88,11 +101,11 @@ async function detectHardwareAcceleration(ffmpegPath) {
     cachedCapabilities = {
       available: false,
       vendor: null,
-      label: 'CPU only',
+      label: "CPU only",
       encoder: null,
       detecting: false,
     };
-    console.log('[gpu] No GPU encoders detected — using CPU codecs.');
+    console.log("[gpu] No GPU encoders detected — using CPU codecs.");
     return cachedCapabilities;
   })();
 
@@ -113,7 +126,7 @@ function getCapabilities() {
     return {
       available: false,
       vendor: null,
-      label: 'Detecting...',
+      label: "Detecting...",
       encoder: null,
       detecting: true,
     };
@@ -122,7 +135,7 @@ function getCapabilities() {
   return {
     available: false,
     vendor: null,
-    label: 'Detecting...',
+    label: "Detecting...",
     encoder: null,
     detecting: true,
   };
@@ -131,36 +144,116 @@ function getCapabilities() {
 /** GPU-accelerated H.264 output options by vendor. */
 function h264Options(vendor) {
   switch (vendor) {
-    case 'nvidia':
-      return ['-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '23', '-pix_fmt', 'yuv420p'];
-    case 'amd':
-      return ['-c:v', 'h264_amf', '-quality', 'balanced', '-rc', 'vbr_latency', '-pix_fmt', 'yuv420p'];
-    case 'intel':
-      return ['-c:v', 'h264_qsv', '-preset', 'medium', '-global_quality', '23', '-pix_fmt', 'nv12'];
-    case 'apple':
-      return ['-c:v', 'h264_videotoolbox', '-pix_fmt', 'yuv420p'];
-    case 'mediafoundation':
-      return ['-c:v', 'h264_mf', '-hw_encoding', '1', '-rate_control', 'quality', '-quality', '75', '-pix_fmt', 'nv12'];
+    case "nvidia":
+      return [
+        "-c:v",
+        "h264_nvenc",
+        "-preset",
+        "p4",
+        "-rc",
+        "vbr",
+        "-cq",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+      ];
+    case "amd":
+      return [
+        "-c:v",
+        "h264_amf",
+        "-quality",
+        "balanced",
+        "-rc",
+        "vbr_latency",
+        "-pix_fmt",
+        "yuv420p",
+      ];
+    case "intel":
+      return [
+        "-c:v",
+        "h264_qsv",
+        "-preset",
+        "medium",
+        "-global_quality",
+        "23",
+        "-pix_fmt",
+        "nv12",
+      ];
+    case "apple":
+      return ["-c:v", "h264_videotoolbox", "-pix_fmt", "yuv420p"];
+    case "mediafoundation":
+      return [
+        "-c:v",
+        "h264_mf",
+        "-hw_encoding",
+        "1",
+        "-rate_control",
+        "quality",
+        "-quality",
+        "75",
+        "-pix_fmt",
+        "nv12",
+      ];
     default:
-      return ['-c:v', 'libx264', '-pix_fmt', 'yuv420p'];
+      return ["-c:v", "libx264", "-pix_fmt", "yuv420p"];
   }
 }
 
 /** GPU-accelerated HEVC output options by vendor (used for MKV / MOV where HEVC is beneficial). */
 function hevcOptions(vendor) {
   switch (vendor) {
-    case 'nvidia':
-      return ['-c:v', 'hevc_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '26', '-pix_fmt', 'yuv420p'];
-    case 'amd':
-      return ['-c:v', 'hevc_amf', '-quality', 'balanced', '-rc', 'vbr_latency', '-pix_fmt', 'yuv420p'];
-    case 'intel':
-      return ['-c:v', 'hevc_qsv', '-preset', 'medium', '-global_quality', '26', '-pix_fmt', 'nv12'];
-    case 'apple':
-      return ['-c:v', 'hevc_videotoolbox', '-pix_fmt', 'yuv420p'];
-    case 'mediafoundation':
-      return ['-c:v', 'hevc_mf', '-hw_encoding', '1', '-rate_control', 'quality', '-quality', '70', '-pix_fmt', 'nv12'];
+    case "nvidia":
+      return [
+        "-c:v",
+        "hevc_nvenc",
+        "-preset",
+        "p4",
+        "-rc",
+        "vbr",
+        "-cq",
+        "26",
+        "-pix_fmt",
+        "yuv420p",
+      ];
+    case "amd":
+      return [
+        "-c:v",
+        "hevc_amf",
+        "-quality",
+        "balanced",
+        "-rc",
+        "vbr_latency",
+        "-pix_fmt",
+        "yuv420p",
+      ];
+    case "intel":
+      return [
+        "-c:v",
+        "hevc_qsv",
+        "-preset",
+        "medium",
+        "-global_quality",
+        "26",
+        "-pix_fmt",
+        "nv12",
+      ];
+    case "apple":
+      return ["-c:v", "hevc_videotoolbox", "-pix_fmt", "yuv420p"];
+    case "mediafoundation":
+      return [
+        "-c:v",
+        "hevc_mf",
+        "-hw_encoding",
+        "1",
+        "-rate_control",
+        "quality",
+        "-quality",
+        "70",
+        "-pix_fmt",
+        "nv12",
+      ];
     default:
-      return ['-c:v', 'libx265', '-pix_fmt', 'yuv420p'];
+      return ["-c:v", "libx265", "-pix_fmt", "yuv420p"];
   }
 }
 
@@ -177,36 +270,48 @@ function getVideoOutputOptions(format, useGpu, vendor) {
   const gpuVendor = useGpu && vendor ? vendor : null;
 
   switch (format) {
-    case 'mp4':
+    case "mp4":
       return [
         ...h264Options(gpuVendor),
-        '-movflags', '+faststart',
-        '-c:a', 'aac', '-b:a', '192k',
+        "-movflags",
+        "+faststart",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
       ];
 
-    case 'webm':
+    case "webm":
       // VP9 GPU encoding is Intel QSV-only and flaky — always use CPU for WebM.
       return [
-        '-c:v', 'libvpx-vp9', '-row-mt', '1', '-pix_fmt', 'yuv420p',
-        '-c:a', 'libopus', '-b:a', '128k',
+        "-c:v",
+        "libvpx-vp9",
+        "-row-mt",
+        "1",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "libopus",
+        "-b:a",
+        "128k",
       ];
 
-    case 'mkv':
-      return [
-        ...h264Options(gpuVendor),
-        '-c:a', 'aac', '-b:a', '192k',
-      ];
+    case "mkv":
+      return [...h264Options(gpuVendor), "-c:a", "aac", "-b:a", "192k"];
 
-    case 'mov':
-      return [
-        ...h264Options(gpuVendor),
-        '-c:a', 'aac', '-b:a', '192k',
-      ];
+    case "mov":
+      return [...h264Options(gpuVendor), "-c:a", "aac", "-b:a", "192k"];
 
-    case 'avi':
+    case "avi":
       return [
-        '-c:v', 'mpeg4', '-q:v', '5',
-        '-c:a', 'libmp3lame', '-b:a', '192k',
+        "-c:v",
+        "mpeg4",
+        "-q:v",
+        "5",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "192k",
       ];
 
     default:

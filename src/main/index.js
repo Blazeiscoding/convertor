@@ -1,6 +1,41 @@
 const path = require('node:path');
-const { app, BrowserWindow } = require('electron/main');
+const { app, BrowserWindow, protocol, net } = require('electron/main');
 const { registerIpcHandlers } = require('./ipcHandlers');
+
+// A custom standard scheme that lets the renderer <video> stream arbitrary
+// local media files (for the trim/crop editor preview) without disabling
+// webSecurity on the BrowserWindow.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'app',
+    privileges: {
+      standard: true,
+      secure: true,
+      stream: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+      corsEnabled: true,
+    },
+  },
+]);
+
+function registerFluxMediaProtocol() {
+  protocol.handle('app', async (request) => {
+    try {
+      const url = new URL(request.url);
+      if (url.hostname !== 'flux-media') {
+        return new Response(null, { status: 404 });
+      }
+      const encoded = url.pathname.replace(/^\//, '');
+      const decodedPath = decodeURIComponent(encoded);
+      const fileUrl = `file:///${decodedPath.replace(/\\/g, '/')}`;
+      return net.fetch(fileUrl, { bypassCustomProtocolHandlers: true });
+    } catch (error) {
+      console.warn('[protocol] app:// fetch failed:', error);
+      return new Response(null, { status: 500 });
+    }
+  });
+}
 
 let mainWindow = null;
 let services = null;
@@ -56,6 +91,7 @@ function createWindow() {
 async function bootstrap() {
   await app.whenReady();
 
+  registerFluxMediaProtocol();
   createWindow();
   services = registerIpcHandlers({
     getMainWindow: () => mainWindow

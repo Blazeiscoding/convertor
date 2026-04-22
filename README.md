@@ -7,7 +7,17 @@ Flux Converter is an offline desktop app for converting local images and videos.
 - Drag-and-drop or browse for local media files
 - Convert both images and videos from a single queue
 - Automatic media probing with FFprobe before queueing
+- Thumbnail previews in the queue (lazy-loaded via `IntersectionObserver`)
 - Per-file output format selection
+- **Quality presets** (low / medium / high / lossless) for every image + video format
+- **Resize controls** (percent scale, fit within a bound, exact dimensions) with optional aspect lock
+- **Video rate-control modes**: quality preset, target bitrate, or target file size (two-pass)
+- **Audio controls** for video outputs: keep, strip, or re-encode with a bitrate selector
+- **Frame-rate override** for videos
+- **Full trim/crop editor** with video preview, in/out markers, and a resizable crop rectangle
+- **Global defaults** in Settings + optional **per-job overrides** right inside each queue row
+- **Bulk apply bar** to set format, quality, or resize presets across all images / videos / pending jobs
+- **Estimated output size** + real-time **conversion ETA**
 - Default output folder and default format preferences
 - Parallel job processing with configurable concurrency from 1 to 4
 - Cancel, retry, remove, and clear conversion history
@@ -142,10 +152,14 @@ Native installers still need to be built on their target operating systems.
 
 1. Files are selected from the UI through drag-and-drop or the system file picker.
 2. The main process probes each file with FFprobe to determine whether it is a supported image or video.
-3. Valid files are turned into queue jobs with an output format and target directory.
-4. The job queue runs conversions using bundled FFmpeg binaries.
-5. Progress, completion, cancellation, and failure events are sent back to the React UI over IPC.
-6. Completed and failed jobs are saved to persistent history through `electron-store`.
+3. Valid files are turned into queue jobs with an output format, target directory, and a resolved `JobOptions` (quality, resize, video rate-control, audio, trim, crop).
+4. Per-job options are built from the global defaults stored in `electron-store` and optionally overridden per file from the queue row or the bulk-apply bar.
+5. `src/main/encoderOptions.js` translates those options into codec-specific FFmpeg arguments for every image format and every CPU/GPU video encoder.
+6. The job queue runs conversions using bundled FFmpeg binaries. Target-file-size mode triggers a two-pass flow that shares a passlog file and reports progress over the 0–50 / 50–100 range.
+7. Progress, completion, cancellation, and failure events are sent back to the React UI over IPC; the renderer derives an ETA from elapsed time and percent while the job runs.
+8. Thumbnails are generated on demand via a single FFmpeg frame extract, cached in an OS-temp directory keyed by `sha1(inputPath + mtime)`.
+9. For the trim/crop editor, a custom `app://flux-media/` protocol registered in the main process streams the source file into an HTML `<video>` element so previews work without disabling `webSecurity`.
+10. Completed and failed jobs are saved to persistent history through `electron-store`, including their resolved `JobOptions` so Retry reuses the same settings.
 
 ## GPU acceleration
 
@@ -169,7 +183,8 @@ The app stores:
 - max parallel job count
 - GPU on/off preference
 - default image and video output formats
-- recent conversion history
+- default encoding options (`defaultOptions`: quality, resize, video rate-control, audio)
+- recent conversion history (including the resolved options used per job)
 
 If the app is closed while conversions are still running, those in-progress jobs are restored as cancelled entries on the next launch.
 

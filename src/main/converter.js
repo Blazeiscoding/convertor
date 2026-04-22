@@ -1,4 +1,6 @@
 const fs = require('node:fs/promises');
+const os = require('node:os');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegStatic = require('ffmpeg-static');
@@ -6,10 +8,16 @@ const ffprobeStatic = require('ffprobe-static');
 const {
   detectHardwareAcceleration,
   getCapabilities,
-  getVideoOutputOptions: getGpuVideoOutputOptions,
 } = require('./gpu');
+const {
+  buildImageOutputArgs,
+  buildVideoOutputArgs,
+  buildGifVideoOutputArgs,
+  resolveOptions,
+} = require('./encoderOptions');
 
 const TEMP_PREFIX = '.my-converter-temp-';
+const PASSLOG_PREFIX = '.my-converter-passlog-';
 const IMAGE_INPUT_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif', '.bmp', '.tif', '.tiff']);
 const VIDEO_INPUT_EXTENSIONS = new Set(['.mp4', '.webm', '.mkv', '.mov', '.avi', '.m4v', '.mpg', '.mpeg']);
 const activeConversions = new Map();
@@ -104,14 +112,15 @@ async function fileExists(targetPath) {
 async function cleanupDirectoryArtifacts(outputDir) {
   try {
     const entries = await fs.readdir(outputDir);
-    const tempFiles = entries.filter((entry) => entry.startsWith(TEMP_PREFIX));
+    const leftovers = entries.filter(
+      (entry) => entry.startsWith(TEMP_PREFIX) || entry.startsWith(PASSLOG_PREFIX)
+    );
     const activeTempPaths = new Set(
       Array.from(activeConversions.values())
-        .map((item) => item.tempOutputPath)
-        .filter(Boolean)
+        .flatMap((item) => [item.tempOutputPath, item.passlogPrefix].filter(Boolean))
     );
 
-    await Promise.all(tempFiles.map(async (entry) => {
+    await Promise.all(leftovers.map(async (entry) => {
       const targetPath = path.join(outputDir, entry);
 
       if (activeTempPaths.has(targetPath)) {
@@ -145,36 +154,8 @@ function buildTempOutputPath(job, finalOutputPath) {
   return path.join(job.outputDir, `${TEMP_PREFIX}${job.jobId}${extension}`);
 }
 
-function getVideoOutputOptions(format, useGpu, caps = getCapabilities()) {
-  const enableGpu = useGpu && caps.available;
-  const tokens = getGpuVideoOutputOptions(format, enableGpu, caps.vendor);
-  // Convert flat token array into space-joined pairs for applyCommandOptions.
-  const options = [];
-  for (let i = 0; i < tokens.length; i += 2) {
-    options.push(`${tokens[i]} ${tokens[i + 1]}`);
-  }
-  return options;
-}
-
-function getImageOutputOptions(format) {
-  const formatSpecificOptions = {
-    jpg: ['-c:v mjpeg', '-q:v 2'],
-    png: ['-c:v png'],
-    webp: ['-c:v libwebp', '-quality 90'],
-    avif: ['-c:v libaom-av1', '-still-picture 1', '-crf 28', '-cpu-used 4'],
-    gif: ['-c:v gif'],
-    bmp: ['-c:v bmp'],
-    tiff: ['-c:v tiff']
-  };
-
-  return ['-vf scale=iw:ih', ...(formatSpecificOptions[format] || [])];
-}
-
-function applyCommandOptions(command, options) {
-  for (const option of options) {
-    const segments = option.split(' ');
-    command.outputOptions(segments[0], ...segments.slice(1));
-  }
+function buildPasslogPath(job) {
+  return path.join(job.outputDir, `${PASSLOG_PREFIX}${job.jobId}`);
 }
 
 async function safelyRemove(targetPath) {
@@ -187,6 +168,16 @@ async function safelyRemove(targetPath) {
   } catch (error) {
     console.warn('Failed to remove temporary output:', targetPath, error);
   }
+}
+
+async function safelyRemovePasslog(passlogPrefix) {
+  if (!passlogPrefix) return;
+  await Promise.all([
+    safelyRemove(`${passlogPrefix}-0.log`),
+    safelyRemove(`${passlogPrefix}-0.log.mbtree`),
+    safelyRemove(`${passlogPrefix}.log`),
+    safelyRemove(`${passlogPrefix}.log.mbtree`),
+  ]);
 }
 
 function releaseReservedOutputPath(targetPath) {
@@ -292,116 +283,217 @@ async function probeMedia(inputPath) {
   }
 }
 
+/**
+ * Run a single ffmpeg invocation. Returns a promise resolving to `{ ok }` or
+ * rejecting with an error. Wires progress/codec callbacks up through `ctx`.
+ */
+function runFfmpegPass(ctx, { inputOptions, outputOptions, outputPath, passRange }) {
+  return new Promise((resolve, reject) => {
+    const command = ffmpeg(ctx.job.inputPath);
+
+    if (inputOptions && inputOptions.length > 0) {
+      command.inputOptions(...inputOptions);
+    }
+
+    command.outputOptions(...outputOptions);
+    command.output(outputPath);
+
+    // Register this command with the cancel registry. For two-pass jobs we
+    // just overwrite the current command each pass.
+    const existing = activeConversions.get(ctx.job.jobId) || {};
+    activeConversions.set(ctx.job.jobId, {
+      ...existing,
+      command,
+      tempOutputPath: ctx.tempOutputPath,
+      passlogPrefix: ctx.passlogPrefix,
+      cancelRequested: existing.cancelRequested || false,
+    });
+
+    command.on('codecData', (data) => {
+      const parsedDuration = parseTimemarkToSeconds(data?.duration);
+      if (parsedDuration) {
+        ctx.durationSeconds = parsedDuration;
+      }
+    });
+
+    command.on('progress', (progress) => {
+      const timemark = progress?.timemark || null;
+      const fallbackPercent = timemark && ctx.durationSeconds
+        ? (parseTimemarkToSeconds(timemark) / ctx.durationSeconds) * 100
+        : null;
+      const rawPercent = Number.isFinite(progress?.percent) ? progress.percent : fallbackPercent;
+      if (!Number.isFinite(rawPercent)) {
+        ctx.callbacks.onProgress?.({ percent: null, timemark });
+        return;
+      }
+
+      const clamped = Math.max(0, Math.min(100, rawPercent));
+      const [rangeStart, rangeEnd] = passRange || [0, 100];
+      const scaled = rangeStart + (clamped / 100) * (rangeEnd - rangeStart);
+
+      ctx.callbacks.onProgress?.({
+        percent: Math.round(scaled),
+        timemark,
+      });
+    });
+
+    command.on('stderr', (line) => {
+      if (typeof line !== 'string') return;
+      ctx.stderrTail.push(line);
+      if (ctx.stderrTail.length > 80) ctx.stderrTail.shift();
+
+      if (!ctx.durationSeconds) {
+        const match = line.match(/Duration:\s*(\d+:\d+:\d+(?:\.\d+)?)/i);
+        const parsedDuration = parseTimemarkToSeconds(match?.[1]);
+
+        if (parsedDuration) {
+          ctx.durationSeconds = parsedDuration;
+        }
+      }
+    });
+
+    command.on('error', (error) => {
+      const activeJob = activeConversions.get(ctx.job.jobId);
+
+      if (activeJob?.cancelRequested || error?.message?.includes('SIGKILL') || error?.message?.includes('SIGTERM')) {
+        const cancelledError = new Error('Conversion cancelled.');
+        cancelledError.code = 'JOB_CANCELLED';
+        reject(cancelledError);
+        return;
+      }
+
+      reject(error);
+    });
+
+    command.on('end', () => {
+      resolve();
+    });
+
+    command.run();
+  });
+}
+
 function convertJob(job, callbacks = {}, options = {}) {
   const useGpu = options.useGpu !== false;
-  return new Promise(async (resolve, reject) => {
+
+  return (async () => {
     let tempOutputPath = null;
     let finalOutputPath = null;
-    let durationSeconds = job.duration || null;
-    let command = null;
+    let passlogPrefix = null;
+    const jobOptions = resolveOptions(job.options);
+
+    const ctx = {
+      job,
+      callbacks,
+      durationSeconds: job.duration || null,
+      stderrTail: [],
+      tempOutputPath: null,
+      passlogPrefix: null,
+    };
 
     try {
       finalOutputPath = await resolveFinalOutputPath(job);
       tempOutputPath = buildTempOutputPath(job, finalOutputPath);
+      ctx.tempOutputPath = tempOutputPath;
       await safelyRemove(tempOutputPath);
 
-      command = ffmpeg(job.inputPath);
-      activeConversions.set(job.jobId, {
-        command,
-        tempOutputPath,
-        cancelRequested: false
-      });
+      activeConversions.set(job.jobId, { tempOutputPath, cancelRequested: false });
 
-      command.on('codecData', (data) => {
-        const parsedDuration = parseTimemarkToSeconds(data?.duration);
-        if (parsedDuration) {
-          durationSeconds = parsedDuration;
-        }
-      });
-
-      command.on('progress', (progress) => {
-        const timemark = progress?.timemark || null;
-        const fallbackPercent = timemark && durationSeconds
-          ? (parseTimemarkToSeconds(timemark) / durationSeconds) * 100
-          : null;
-        const percent = Number.isFinite(progress?.percent)
-          ? progress.percent
-          : fallbackPercent;
-
-        callbacks.onProgress?.({
-          percent: Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : null,
-          timemark
-        });
-      });
-
-      command.on('stderr', (line) => {
-        if (!durationSeconds && typeof line === 'string') {
-          const match = line.match(/Duration:\s*(\d+:\d+:\d+(?:\.\d+)?)/i);
-          const parsedDuration = parseTimemarkToSeconds(match?.[1]);
-
-          if (parsedDuration) {
-            durationSeconds = parsedDuration;
-          }
-        }
-      });
-
-      command.on('error', async (error) => {
-        const activeJob = activeConversions.get(job.jobId);
-        activeConversions.delete(job.jobId);
-        releaseReservedOutputPath(finalOutputPath);
-        await safelyRemove(tempOutputPath);
-
-        if (activeJob?.cancelRequested || error?.message?.includes('SIGKILL') || error?.message?.includes('SIGTERM')) {
-          const cancelledError = new Error('Conversion cancelled.');
-          cancelledError.code = 'JOB_CANCELLED';
-          reject(cancelledError);
-          return;
-        }
-
-        reject(new Error(summarizeErrorMessage(error?.message || 'FFmpeg conversion failed.')));
-      });
-
-      command.on('end', async () => {
-        try {
-          activeConversions.delete(job.jobId);
-          await fs.rename(tempOutputPath, finalOutputPath);
-          releaseReservedOutputPath(finalOutputPath);
-          callbacks.onProgress?.({ percent: 100, timemark: null });
-          resolve({ outputPath: finalOutputPath });
-        } catch (error) {
-          releaseReservedOutputPath(finalOutputPath);
-          await safelyRemove(tempOutputPath);
-          reject(error);
-        }
-      });
+      const probe = {
+        detectedType: job.detectedType,
+        duration: job.duration,
+        width: job.dimensions?.width || null,
+        height: job.dimensions?.height || null,
+        hasAudio: Boolean(job.hasAudio),
+      };
 
       if (job.detectedType === 'image') {
-        applyCommandOptions(command, getImageOutputOptions(job.outputFormat));
-        command.output(tempOutputPath);
+        const outputArgs = buildImageOutputArgs(job.outputFormat, jobOptions, probe);
+        await runFfmpegPass(ctx, {
+          inputOptions: [],
+          outputOptions: outputArgs,
+          outputPath: tempOutputPath,
+          passRange: [0, 100],
+        });
       } else if (job.outputFormat === 'gif') {
-        command.outputOptions(
-          '-vf',
-          'fps=12,scale=iw:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse'
-        );
-        command.noAudio();
-        command.output(tempOutputPath);
+        const built = buildGifVideoOutputArgs(jobOptions, probe);
+        await runFfmpegPass(ctx, {
+          inputOptions: built.inputOptions,
+          outputOptions: built.outputOptions,
+          outputPath: tempOutputPath,
+          passRange: [0, 100],
+        });
       } else {
         const gpuCapabilities = useGpu
           ? await detectHardwareAcceleration(ffmpegPath)
           : getCapabilities();
+        const built = buildVideoOutputArgs(job.outputFormat, jobOptions, probe, gpuCapabilities);
 
-        applyCommandOptions(command, getVideoOutputOptions(job.outputFormat, useGpu, gpuCapabilities));
-        command.output(tempOutputPath);
+        if (built.needsTwoPass) {
+          passlogPrefix = path.join(job.outputDir, `${PASSLOG_PREFIX}${job.jobId}`);
+          ctx.passlogPrefix = passlogPrefix;
+
+          // Override the passlog prefix so it lands in the output dir.
+          const pass1 = built.pass1OutputOptions.map((arg) =>
+            arg === built.passlogPrefix ? passlogPrefix : arg
+          );
+          const pass2 = built.pass2OutputOptions.map((arg) =>
+            arg === built.passlogPrefix ? passlogPrefix : arg
+          );
+
+          const nullOutput = process.platform === 'win32' ? 'NUL' : '/dev/null';
+
+          await runFfmpegPass(ctx, {
+            inputOptions: built.inputOptions,
+            outputOptions: pass1,
+            outputPath: nullOutput,
+            passRange: [0, 50],
+          });
+
+          await runFfmpegPass(ctx, {
+            inputOptions: built.inputOptions,
+            outputOptions: pass2,
+            outputPath: tempOutputPath,
+            passRange: [50, 100],
+          });
+        } else {
+          await runFfmpegPass(ctx, {
+            inputOptions: built.inputOptions,
+            outputOptions: built.outputOptions,
+            outputPath: tempOutputPath,
+            passRange: [0, 100],
+          });
+        }
       }
 
-      command.run();
+      activeConversions.delete(job.jobId);
+      await fs.rename(tempOutputPath, finalOutputPath);
+      releaseReservedOutputPath(finalOutputPath);
+
+      if (passlogPrefix) {
+        await safelyRemovePasslog(passlogPrefix);
+      }
+
+      callbacks.onProgress?.({ percent: 100, timemark: null });
+      return { outputPath: finalOutputPath };
     } catch (error) {
       activeConversions.delete(job.jobId);
       releaseReservedOutputPath(finalOutputPath);
       await safelyRemove(tempOutputPath);
-      reject(new Error(summarizeErrorMessage(error instanceof Error ? error.message : 'Conversion failed.')));
+
+      if (passlogPrefix) {
+        await safelyRemovePasslog(passlogPrefix);
+      }
+
+      if (error?.code === 'JOB_CANCELLED') {
+        throw error;
+      }
+
+      const wrapped = new Error(summarizeErrorMessage(error?.message || 'FFmpeg conversion failed.'));
+      wrapped.stderrTail = ctx.stderrTail.slice(-40).join('\n');
+      throw wrapped;
     }
-  });
+  })();
 }
 
 async function waitForConversionExit(jobId, timeoutMs) {
@@ -426,12 +518,18 @@ async function cancelConversion(jobId) {
   }
 
   activeJob.cancelRequested = true;
-  activeJob.command.kill('SIGTERM');
+
+  if (activeJob.command) {
+    activeJob.command.kill('SIGTERM');
+  }
 
   const exitedGracefully = await waitForConversionExit(jobId, 1200);
 
   if (exitedGracefully) {
     await safelyRemove(activeJob.tempOutputPath);
+    if (activeJob.passlogPrefix) {
+      await safelyRemovePasslog(activeJob.passlogPrefix);
+    }
     return;
   }
 
@@ -439,9 +537,90 @@ async function cancelConversion(jobId) {
 
   if (forcedJob) {
     forcedJob.cancelRequested = true;
-    forcedJob.command.kill('SIGKILL');
+    if (forcedJob.command) {
+      forcedJob.command.kill('SIGKILL');
+    }
     await waitForConversionExit(jobId, 800);
     await safelyRemove(forcedJob.tempOutputPath);
+    if (forcedJob.passlogPrefix) {
+      await safelyRemovePasslog(forcedJob.passlogPrefix);
+    }
+  }
+}
+
+// ── Thumbnail generation ────────────────────────────────────────────────
+const THUMBNAIL_CACHE_DIR = path.join(os.tmpdir(), 'flux-converter-thumbs');
+const thumbnailPromiseCache = new Map();
+
+async function ensureThumbnailCacheDir() {
+  try {
+    await fs.mkdir(THUMBNAIL_CACHE_DIR, { recursive: true });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+  }
+}
+
+function thumbnailKey(inputPath, mtimeMs) {
+  return crypto.createHash('sha1').update(`${inputPath}|${mtimeMs}`).digest('hex');
+}
+
+function runThumbnailExtract(inputPath, detectedType, targetPath) {
+  return new Promise((resolve, reject) => {
+    const command = ffmpeg(inputPath);
+    const filter = 'scale=192:-1:force_original_aspect_ratio=decrease:flags=lanczos';
+
+    if (detectedType === 'video') {
+      command.inputOptions('-ss', '1.5');
+    }
+
+    command
+      .outputOptions('-vf', filter, '-frames:v', '1', '-q:v', '5', '-y')
+      .output(targetPath)
+      .on('end', () => resolve())
+      .on('error', (error) => reject(error))
+      .run();
+  });
+}
+
+async function generateThumbnail(inputPath, detectedType) {
+  if (!inputPath || !detectedType) return null;
+
+  let stats;
+  try {
+    stats = await fs.stat(inputPath);
+  } catch {
+    return null;
+  }
+
+  const key = thumbnailKey(inputPath, stats.mtimeMs);
+  const cachedPath = path.join(THUMBNAIL_CACHE_DIR, `${key}.jpg`);
+
+  if (thumbnailPromiseCache.has(key)) {
+    return thumbnailPromiseCache.get(key);
+  }
+
+  const promise = (async () => {
+    await ensureThumbnailCacheDir();
+
+    try {
+      await fs.access(cachedPath);
+    } catch {
+      await runThumbnailExtract(inputPath, detectedType, cachedPath);
+    }
+
+    const bytes = await fs.readFile(cachedPath);
+    return `data:image/jpeg;base64,${bytes.toString('base64')}`;
+  })();
+
+  thumbnailPromiseCache.set(key, promise);
+
+  try {
+    const result = await promise;
+    return result;
+  } catch (error) {
+    thumbnailPromiseCache.delete(key);
+    console.warn('[thumbnail] generation failed for', inputPath, error?.message);
+    return null;
   }
 }
 
@@ -450,6 +629,7 @@ module.exports = {
   convertJob,
   cancelConversion,
   probeMedia,
+  generateThumbnail,
   detectHardwareAcceleration: () => detectHardwareAcceleration(ffmpegPath),
   getGpuCapabilities: getCapabilities,
 };

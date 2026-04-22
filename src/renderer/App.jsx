@@ -1,9 +1,23 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useState } from 'react';
+import BulkActionsBar from './components/BulkActionsBar';
 import DropZone from './components/DropZone';
 import FormatPicker from './components/FormatPicker';
 import JobList from './components/JobList';
+import OptionsPanel from './components/OptionsPanel';
 import QueueToolbar from './components/QueueToolbar';
 import Toast from './components/Toast';
+
+const DEFAULT_JOB_OPTIONS = {
+  quality: 'medium',
+  resize: { mode: 'none', keepAspect: true },
+  video: {
+    rateControl: 'quality',
+    fps: null,
+    audio: { mode: 'keep', bitrateKbps: 192 },
+    trim: null,
+    crop: null,
+  },
+};
 
 const IMAGE_FORMATS = ['jpg', 'png', 'webp', 'avif', 'gif', 'bmp', 'tiff'];
 const VIDEO_FORMATS = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'gif'];
@@ -28,7 +42,8 @@ function createDraftJob(file, defaultFormats) {
     progressMode: file.progressMode || 'indeterminate',
     duration: file.duration || null,
     dimensions: file.dimensions || null,
-    hasAudio: Boolean(file.hasAudio)
+    hasAudio: Boolean(file.hasAudio),
+    optionsOverride: file.optionsOverride || null
   };
 }
 
@@ -113,7 +128,8 @@ export default function App() {
     defaultOutputDir: null,
     maxConcurrent: 1,
     useGpu: true,
-    defaultFormats: { image: 'png', video: 'mp4' }
+    defaultFormats: { image: 'png', video: 'mp4' },
+    defaultOptions: DEFAULT_JOB_OPTIONS
   });
   const [gpuInfo, setGpuInfo] = useState({ available: false, vendor: null, label: 'Detecting...', detecting: true });
   const [selectedOutputDir, setSelectedOutputDir] = useState('');
@@ -123,6 +139,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedRows, setExpandedRows] = useState(() => new Set());
   const [queueScope, setQueueScope] = useState('all');
+  const [bulkScope, setBulkScope] = useState('all');
 
   const supportedFormats = useMemo(() => ({
     image: IMAGE_FORMATS,
@@ -234,7 +251,8 @@ export default function App() {
     if (status === 'queued' || status === 'converting') {
       updateAnyJobById(jobId, (job) => ({
         ...job,
-        status
+        status,
+        startedAt: status === 'converting' && !job.startedAt ? Date.now() : job.startedAt
       }));
       return;
     }
@@ -452,12 +470,84 @@ export default function App() {
     }
   }
 
+  async function handleDefaultOptionsChange(nextOptions) {
+    try {
+      await persistSettings({
+        ...settings,
+        defaultOptions: nextOptions
+      });
+    } catch (error) {
+      pushToast('error', error.message);
+    }
+  }
+
   function handleJobFormatChange(clientId, outputFormat) {
     setJobs((currentJobs) => currentJobs.map((job) => (
       job.clientId === clientId
         ? { ...job, outputFormat }
         : job
     )));
+  }
+
+  function handleJobOptionsChange(clientId, nextOverride) {
+    setJobs((currentJobs) => currentJobs.map((job) => (
+      job.clientId === clientId
+        ? { ...job, optionsOverride: nextOverride }
+        : job
+    )));
+  }
+
+  function handleJobOptionsClear(clientId) {
+    setJobs((currentJobs) => currentJobs.map((job) => (
+      job.clientId === clientId
+        ? { ...job, optionsOverride: null }
+        : job
+    )));
+  }
+
+  function jobMatchesScope(job, scope) {
+    if (job.status !== 'pending-edit') return false;
+    if (scope === 'images') return job.detectedType === 'image';
+    if (scope === 'videos') return job.detectedType === 'video';
+    return true;
+  }
+
+  function handleBulkSetFormat(scope, outputFormat) {
+    setJobs((currentJobs) => currentJobs.map((job) => (
+      jobMatchesScope(job, scope) && supportedFormats[job.detectedType].includes(outputFormat)
+        ? { ...job, outputFormat }
+        : job
+    )));
+    pushToast('success', `Applied format ${outputFormat.toUpperCase()} to matching files.`);
+  }
+
+  function handleBulkSetQuality(scope, quality) {
+    setJobs((currentJobs) => currentJobs.map((job) => {
+      if (!jobMatchesScope(job, scope)) return job;
+      const base = job.optionsOverride || settings.defaultOptions || DEFAULT_JOB_OPTIONS;
+      return { ...job, optionsOverride: { ...base, quality } };
+    }));
+    pushToast('success', `Set quality preset to ${quality}.`);
+  }
+
+  function handleBulkSetResize(scope, resizePatch) {
+    setJobs((currentJobs) => currentJobs.map((job) => {
+      if (!jobMatchesScope(job, scope)) return job;
+      const base = job.optionsOverride || settings.defaultOptions || DEFAULT_JOB_OPTIONS;
+      const nextResize = { ...(base.resize || {}), ...resizePatch };
+      return { ...job, optionsOverride: { ...base, resize: nextResize } };
+    }));
+    pushToast('success', 'Updated resize for matching files.');
+  }
+
+  function handleBulkClearOverrides(scope) {
+    let cleared = 0;
+    setJobs((currentJobs) => currentJobs.map((job) => {
+      if (!jobMatchesScope(job, scope) || !job.optionsOverride) return job;
+      cleared += 1;
+      return { ...job, optionsOverride: null };
+    }));
+    pushToast('info', cleared > 0 ? `Cleared overrides on ${cleared} file${cleared === 1 ? '' : 's'}.` : 'No overrides to clear.');
   }
 
   async function handleRevealOutput(targetPath) {
@@ -610,7 +700,8 @@ export default function App() {
         files: draftJobs.map((job) => ({
           requestId: job.clientId,
           inputPath: job.inputPath,
-          outputFormat: job.outputFormat
+          outputFormat: job.outputFormat,
+          options: job.optionsOverride || undefined
         })),
         outputDir: selectedOutputDir || null
       });
@@ -698,6 +789,73 @@ export default function App() {
   const visibleActiveJobs = queueScope === 'recent' ? [] : jobs;
   const visibleRecentJobs = queueScope === 'active' ? [] : recentJobs;
 
+  const bulkCounts = useMemo(() => {
+    const pending = jobs.filter((job) => job.status === 'pending-edit');
+    return {
+      images: pending.filter((job) => job.detectedType === 'image').length,
+      videos: pending.filter((job) => job.detectedType === 'video').length,
+      total: pending.length
+    };
+  }, [jobs]);
+
+  const [estimatedSizes, setEstimatedSizes] = useState({});
+
+  const estimateSignature = useMemo(() => (
+    jobs
+      .filter((job) => job.status === 'pending-edit' && job.detectedType)
+      .map((job) => [
+        job.clientId,
+        job.outputFormat,
+        job.optionsOverride ? JSON.stringify(job.optionsOverride) : 'defaults'
+      ].join('|'))
+      .join(';')
+  ), [jobs]);
+
+  useEffect(() => {
+    const items = jobs
+      .filter((job) => job.status === 'pending-edit' && job.detectedType)
+      .map((job) => ({
+        requestId: job.clientId,
+        detectedType: job.detectedType,
+        duration: job.duration,
+        width: job.dimensions?.width,
+        height: job.dimensions?.height,
+        dimensions: job.dimensions,
+        outputFormat: job.outputFormat,
+        options: job.optionsOverride || undefined
+      }));
+
+    if (items.length === 0 || !window.converter?.estimateSize) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const response = await window.converter.estimateSize(items);
+        if (cancelled || !response?.ok) return;
+        setEstimatedSizes((prev) => {
+          const next = { ...prev };
+          let changed = false;
+          for (const estimate of response.estimates) {
+            if (next[estimate.requestId] !== estimate.bytes) {
+              next[estimate.requestId] = estimate.bytes;
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      } catch {
+        // Silent — estimates are best-effort.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [estimateSignature, settings.defaultOptions]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <main className="app-shell">
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:px-6 lg:px-8">
@@ -766,13 +924,30 @@ export default function App() {
             onClearHistory={handleClearHistory}
           />
 
+          {bulkCounts.total > 0 ? (
+            <BulkActionsBar
+              scope={bulkScope}
+              onScopeChange={setBulkScope}
+              counts={bulkCounts}
+              formatOptions={supportedFormats}
+              onSetFormat={handleBulkSetFormat}
+              onSetQuality={handleBulkSetQuality}
+              onSetResize={handleBulkSetResize}
+              onClearOverrides={handleBulkClearOverrides}
+            />
+          ) : null}
+
           <JobList
             activeJobs={visibleActiveJobs}
             recentJobs={visibleRecentJobs}
             expandedRows={expandedRows}
             formatOptions={supportedFormats}
+            defaultOptions={settings.defaultOptions || DEFAULT_JOB_OPTIONS}
+            estimatedSizes={estimatedSizes}
             onToggleExpanded={toggleExpanded}
             onFormatChange={handleJobFormatChange}
+            onOptionsChange={handleJobOptionsChange}
+            onOptionsClear={handleJobOptionsClear}
             onRevealOutput={handleRevealOutput}
             onCopyPath={handleCopyPath}
             onCancelJob={handleCancelJob}
@@ -902,6 +1077,23 @@ export default function App() {
                       </p>
                     )}
                   </div>
+                </div>
+
+                <div className="mt-5 border-t pt-5" style={{ borderColor: 'var(--border)' }}>
+                  <div className="mb-3">
+                    <h3 className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>
+                      Encoding options
+                    </h3>
+                    <p className="mt-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                      Global defaults applied to every conversion. Individual files can override these later.
+                    </p>
+                  </div>
+                  <OptionsPanel
+                    value={settings.defaultOptions || DEFAULT_JOB_OPTIONS}
+                    onChange={handleDefaultOptionsChange}
+                    mediaType="both"
+                    showTrimCrop={false}
+                  />
                 </div>
               </div>
             </div>

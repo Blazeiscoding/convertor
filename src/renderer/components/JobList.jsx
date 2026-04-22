@@ -1,25 +1,7 @@
 import FormatPicker from './FormatPicker';
 import JobRowDetails from './JobRowDetails';
 import ProgressBar from './ProgressBar';
-
-function ImageIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-      <circle cx="9" cy="9" r="2" />
-      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-    </svg>
-  );
-}
-
-function VideoIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5" />
-      <rect x="2" y="6" width="14" height="12" rx="2" />
-    </svg>
-  );
-}
+import Thumbnail from './Thumbnail';
 
 function ChevronDown({ open }) {
   return (
@@ -129,8 +111,12 @@ function JobRow({
   job,
   isExpanded,
   formatOptions,
+  defaultOptions,
+  estimatedBytes,
   onToggleExpanded,
   onFormatChange,
+  onOptionsChange,
+  onOptionsClear,
   onRevealOutput,
   onCopyPath,
   onCancelJob,
@@ -140,7 +126,6 @@ function JobRow({
   const rowKey = job.jobId || job.clientId;
   const uiStatus = job.status === 'pending-edit' ? 'ready' : job.status;
   const isEditable = !job.jobId && job.status === 'pending-edit';
-  const Icon = job.detectedType === 'image' ? ImageIcon : VideoIcon;
 
   const actions = [];
 
@@ -186,9 +171,7 @@ function JobRow({
       <button type="button" className="queue-row__button" onClick={() => onToggleExpanded(rowKey)}>
         <div className="queue-row__grid">
           <div className="flex min-w-0 items-start gap-3">
-            <div className="queue-row__icon">
-              <Icon />
-            </div>
+            <Thumbnail inputPath={job.inputPath} detectedType={job.detectedType} />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h4 className="truncate text-sm font-medium" style={{ color: 'var(--foreground)' }}>
@@ -197,6 +180,15 @@ function JobRow({
                 <span className="queue-badge" style={badgeStyle(uiStatus)}>
                   {formatStatus(job.status)}
                 </span>
+                {job.optionsOverride ? (
+                  <span
+                    className="queue-badge"
+                    title="Custom encoding options for this file"
+                    style={{ background: 'rgba(125, 211, 252, 0.12)', color: '#7dd3fc', border: '1px solid rgba(125, 211, 252, 0.22)' }}
+                  >
+                    Custom
+                  </span>
+                ) : null}
               </div>
               <p className="mt-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
                 {formatMetadataLine(job)}
@@ -223,7 +215,13 @@ function JobRow({
               mode={job.progressMode}
               status={job.status}
               timemark={job.timemark}
+              startedAt={job.startedAt}
             />
+            {job.status === 'pending-edit' && Number.isFinite(estimatedBytes) && estimatedBytes > 0 ? (
+              <p className="mt-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                ~{formatBytes(estimatedBytes)} estimated
+              </p>
+            ) : null}
             {job.errorMessage && !isExpanded ? (
               <p className="mt-2 truncate text-xs" style={{ color: '#fca5a5' }}>
                 {job.errorMessage}
@@ -246,8 +244,12 @@ function JobRow({
         <div className="queue-row__details">
           <JobRowDetails
             job={job}
+            defaultOptions={defaultOptions}
+            estimatedBytes={estimatedBytes}
             onRevealOutput={onRevealOutput}
             onCopyPath={onCopyPath}
+            onOptionsChange={onOptionsChange}
+            onOptionsClear={onOptionsClear}
             actions={actions}
           />
         </div>
@@ -261,8 +263,12 @@ export default function JobList({
   recentJobs,
   expandedRows,
   formatOptions,
+  defaultOptions,
+  estimatedSizes = {},
   onToggleExpanded,
   onFormatChange,
+  onOptionsChange,
+  onOptionsClear,
   onRevealOutput,
   onCopyPath,
   onCancelJob,
@@ -286,8 +292,12 @@ export default function JobList({
               job={job}
               isExpanded={expandedRows.has(job.jobId || job.clientId)}
               formatOptions={formatOptions}
+              defaultOptions={defaultOptions}
+              estimatedBytes={estimatedSizes[job.clientId]}
               onToggleExpanded={onToggleExpanded}
               onFormatChange={onFormatChange}
+              onOptionsChange={onOptionsChange}
+              onOptionsClear={onOptionsClear}
               onRevealOutput={onRevealOutput}
               onCopyPath={onCopyPath}
               onCancelJob={onCancelJob}
@@ -307,8 +317,12 @@ export default function JobList({
               job={job}
               isExpanded={expandedRows.has(job.jobId || job.clientId)}
               formatOptions={formatOptions}
+              defaultOptions={defaultOptions}
+              estimatedBytes={estimatedSizes[job.clientId]}
               onToggleExpanded={onToggleExpanded}
               onFormatChange={onFormatChange}
+              onOptionsChange={onOptionsChange}
+              onOptionsClear={onOptionsClear}
               onRevealOutput={onRevealOutput}
               onCopyPath={onCopyPath}
               onCancelJob={onCancelJob}
