@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import OptionsPanel from './OptionsPanel';
+import TrimCropEditor from './TrimCropEditor';
 
 function formatDuration(seconds) {
   if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -57,8 +58,11 @@ export default function JobRowDetails({
   const isEditable = !job.jobId && job.status === 'pending-edit';
   const hasOverride = Boolean(job.optionsOverride);
   const [optionsOpen, setOptionsOpen] = useState(hasOverride);
+  const [editorOpen, setEditorOpen] = useState(false);
 
   const effectiveOptions = job.optionsOverride || defaultOptions;
+  const existingTrim = job.optionsOverride?.video?.trim || null;
+  const existingCrop = job.optionsOverride?.video?.crop || null;
 
   const handleOptionsChange = (nextOptions) => {
     onOptionsChange?.(job.clientId, nextOptions);
@@ -67,6 +71,14 @@ export default function JobRowDetails({
 
   const handleClear = () => {
     onOptionsClear?.(job.clientId);
+  };
+
+  const handleEditorSave = ({ trim, crop }) => {
+    const base = job.optionsOverride || defaultOptions;
+    const nextVideo = { ...(base.video || {}), trim, crop };
+    onOptionsChange?.(job.clientId, { ...base, video: nextVideo });
+    setEditorOpen(false);
+    setOptionsOpen(true);
   };
 
   return (
@@ -141,14 +153,26 @@ export default function JobRowDetails({
       {isEditable && onOptionsChange ? (
         <div className="job-override">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => setOptionsOpen((open) => !open)}
-            >
-              <ChevronDown open={optionsOpen} />
-              {hasOverride ? 'Custom encoding options' : 'Override encoding options'}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setOptionsOpen((open) => !open)}
+              >
+                <ChevronDown open={optionsOpen} />
+                {hasOverride ? 'Custom encoding options' : 'Override encoding options'}
+              </button>
+
+              {job.detectedType === 'video' ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setEditorOpen(true)}
+                >
+                  {existingTrim || existingCrop ? 'Edit clip' : 'Trim / crop...'}
+                </button>
+              ) : null}
+            </div>
 
             {hasOverride ? (
               <button type="button" className="subtle-danger-button" onClick={handleClear}>
@@ -156,6 +180,15 @@ export default function JobRowDetails({
               </button>
             ) : null}
           </div>
+
+          <TrimCropEditor
+            open={editorOpen && job.detectedType === 'video'}
+            job={job}
+            initialTrim={existingTrim}
+            initialCrop={existingCrop}
+            onSave={handleEditorSave}
+            onClose={() => setEditorOpen(false)}
+          />
 
           {optionsOpen ? (
             <div className="job-override__panel">
