@@ -251,7 +251,8 @@ export default function App() {
     if (status === 'queued' || status === 'converting') {
       updateAnyJobById(jobId, (job) => ({
         ...job,
-        status
+        status,
+        startedAt: status === 'converting' && !job.startedAt ? Date.now() : job.startedAt
       }));
       return;
     }
@@ -797,6 +798,64 @@ export default function App() {
     };
   }, [jobs]);
 
+  const [estimatedSizes, setEstimatedSizes] = useState({});
+
+  const estimateSignature = useMemo(() => (
+    jobs
+      .filter((job) => job.status === 'pending-edit' && job.detectedType)
+      .map((job) => [
+        job.clientId,
+        job.outputFormat,
+        job.optionsOverride ? JSON.stringify(job.optionsOverride) : 'defaults'
+      ].join('|'))
+      .join(';')
+  ), [jobs]);
+
+  useEffect(() => {
+    const items = jobs
+      .filter((job) => job.status === 'pending-edit' && job.detectedType)
+      .map((job) => ({
+        requestId: job.clientId,
+        detectedType: job.detectedType,
+        duration: job.duration,
+        width: job.dimensions?.width,
+        height: job.dimensions?.height,
+        dimensions: job.dimensions,
+        outputFormat: job.outputFormat,
+        options: job.optionsOverride || undefined
+      }));
+
+    if (items.length === 0 || !window.converter?.estimateSize) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const response = await window.converter.estimateSize(items);
+        if (cancelled || !response?.ok) return;
+        setEstimatedSizes((prev) => {
+          const next = { ...prev };
+          let changed = false;
+          for (const estimate of response.estimates) {
+            if (next[estimate.requestId] !== estimate.bytes) {
+              next[estimate.requestId] = estimate.bytes;
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      } catch {
+        // Silent — estimates are best-effort.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [estimateSignature, settings.defaultOptions]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <main className="app-shell">
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:px-6 lg:px-8">
@@ -884,6 +943,7 @@ export default function App() {
             expandedRows={expandedRows}
             formatOptions={supportedFormats}
             defaultOptions={settings.defaultOptions || DEFAULT_JOB_OPTIONS}
+            estimatedSizes={estimatedSizes}
             onToggleExpanded={toggleExpanded}
             onFormatChange={handleJobFormatChange}
             onOptionsChange={handleJobOptionsChange}

@@ -481,6 +481,16 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.progress-eta {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #7dd3fc;
+  font-variant-numeric: tabular-nums;
+  padding: 0 0.35rem;
+  border-radius: var(--radius-pill);
+  background: rgba(56, 189, 248, 0.08);
+}
+
 /* ── Details panel ── */
 .details-label {
   font-size: 0.65rem;

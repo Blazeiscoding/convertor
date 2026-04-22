@@ -36,9 +36,18 @@ function ChevronDown({ open }) {
   );
 }
 
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / (1024 ** exponent);
+  return `${value.toFixed(value >= 10 || exponent === 0 ? 0 : 1)} ${units[exponent]}`;
+}
+
 export default function JobRowDetails({
   job,
   defaultOptions,
+  estimatedBytes,
   onRevealOutput,
   onCopyPath,
   onOptionsChange,
@@ -102,6 +111,12 @@ export default function JobRowDetails({
               <span className="details-label">Audio</span>
               <span className="details-value">{job.hasAudio ? 'Yes' : 'No'}</span>
             </div>
+            {Number.isFinite(estimatedBytes) && estimatedBytes > 0 ? (
+              <div className="details-pill">
+                <span className="details-label">Est. size</span>
+                <span className="details-value">~{formatBytes(estimatedBytes)}</span>
+              </div>
+            ) : null}
           </div>
 
           {job.outputPath ? (

@@ -112,6 +112,7 @@ function JobRow({
   isExpanded,
   formatOptions,
   defaultOptions,
+  estimatedBytes,
   onToggleExpanded,
   onFormatChange,
   onOptionsChange,
@@ -214,7 +215,13 @@ function JobRow({
               mode={job.progressMode}
               status={job.status}
               timemark={job.timemark}
+              startedAt={job.startedAt}
             />
+            {job.status === 'pending-edit' && Number.isFinite(estimatedBytes) && estimatedBytes > 0 ? (
+              <p className="mt-2 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                ~{formatBytes(estimatedBytes)} estimated
+              </p>
+            ) : null}
             {job.errorMessage && !isExpanded ? (
               <p className="mt-2 truncate text-xs" style={{ color: '#fca5a5' }}>
                 {job.errorMessage}
@@ -238,6 +245,7 @@ function JobRow({
           <JobRowDetails
             job={job}
             defaultOptions={defaultOptions}
+            estimatedBytes={estimatedBytes}
             onRevealOutput={onRevealOutput}
             onCopyPath={onCopyPath}
             onOptionsChange={onOptionsChange}
@@ -256,6 +264,7 @@ export default function JobList({
   expandedRows,
   formatOptions,
   defaultOptions,
+  estimatedSizes = {},
   onToggleExpanded,
   onFormatChange,
   onOptionsChange,
@@ -284,6 +293,7 @@ export default function JobList({
               isExpanded={expandedRows.has(job.jobId || job.clientId)}
               formatOptions={formatOptions}
               defaultOptions={defaultOptions}
+              estimatedBytes={estimatedSizes[job.clientId]}
               onToggleExpanded={onToggleExpanded}
               onFormatChange={onFormatChange}
               onOptionsChange={onOptionsChange}
@@ -308,6 +318,7 @@ export default function JobList({
               isExpanded={expandedRows.has(job.jobId || job.clientId)}
               formatOptions={formatOptions}
               defaultOptions={defaultOptions}
+              estimatedBytes={estimatedSizes[job.clientId]}
               onToggleExpanded={onToggleExpanded}
               onFormatChange={onFormatChange}
               onOptionsChange={onOptionsChange}
