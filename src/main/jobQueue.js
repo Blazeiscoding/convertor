@@ -107,7 +107,8 @@ class JobQueue {
         this.onStatus?.({ jobId: job.jobId, status: 'failed' });
         this.onError?.({
           jobId: job.jobId,
-          message: error instanceof Error ? error.message : 'Unknown conversion error.'
+          message: error instanceof Error ? error.message : 'Unknown conversion error.',
+          stderrTail: error && typeof error === 'object' && error.stderrTail ? error.stderrTail : null
         });
       }
     } finally {
