@@ -1,4 +1,6 @@
 const fs = require('node:fs/promises');
+const os = require('node:os');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegStatic = require('ffmpeg-static');
@@ -546,11 +548,88 @@ async function cancelConversion(jobId) {
   }
 }
 
+// ── Thumbnail generation ────────────────────────────────────────────────
+const THUMBNAIL_CACHE_DIR = path.join(os.tmpdir(), 'flux-converter-thumbs');
+const thumbnailPromiseCache = new Map();
+
+async function ensureThumbnailCacheDir() {
+  try {
+    await fs.mkdir(THUMBNAIL_CACHE_DIR, { recursive: true });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+  }
+}
+
+function thumbnailKey(inputPath, mtimeMs) {
+  return crypto.createHash('sha1').update(`${inputPath}|${mtimeMs}`).digest('hex');
+}
+
+function runThumbnailExtract(inputPath, detectedType, targetPath) {
+  return new Promise((resolve, reject) => {
+    const command = ffmpeg(inputPath);
+    const filter = 'scale=192:-1:force_original_aspect_ratio=decrease:flags=lanczos';
+
+    if (detectedType === 'video') {
+      command.inputOptions('-ss', '1.5');
+    }
+
+    command
+      .outputOptions('-vf', filter, '-frames:v', '1', '-q:v', '5', '-y')
+      .output(targetPath)
+      .on('end', () => resolve())
+      .on('error', (error) => reject(error))
+      .run();
+  });
+}
+
+async function generateThumbnail(inputPath, detectedType) {
+  if (!inputPath || !detectedType) return null;
+
+  let stats;
+  try {
+    stats = await fs.stat(inputPath);
+  } catch {
+    return null;
+  }
+
+  const key = thumbnailKey(inputPath, stats.mtimeMs);
+  const cachedPath = path.join(THUMBNAIL_CACHE_DIR, `${key}.jpg`);
+
+  if (thumbnailPromiseCache.has(key)) {
+    return thumbnailPromiseCache.get(key);
+  }
+
+  const promise = (async () => {
+    await ensureThumbnailCacheDir();
+
+    try {
+      await fs.access(cachedPath);
+    } catch {
+      await runThumbnailExtract(inputPath, detectedType, cachedPath);
+    }
+
+    const bytes = await fs.readFile(cachedPath);
+    return `data:image/jpeg;base64,${bytes.toString('base64')}`;
+  })();
+
+  thumbnailPromiseCache.set(key, promise);
+
+  try {
+    const result = await promise;
+    return result;
+  } catch (error) {
+    thumbnailPromiseCache.delete(key);
+    console.warn('[thumbnail] generation failed for', inputPath, error?.message);
+    return null;
+  }
+}
+
 module.exports = {
   cleanupDirectoryArtifacts,
   convertJob,
   cancelConversion,
   probeMedia,
+  generateThumbnail,
   detectHardwareAcceleration: () => detectHardwareAcceleration(ffmpegPath),
   getGpuCapabilities: getCapabilities,
 };

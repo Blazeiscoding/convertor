@@ -11,6 +11,7 @@ const {
   cancelConversion,
   cleanupDirectoryArtifacts,
   probeMedia,
+  generateThumbnail,
   detectHardwareAcceleration,
   getGpuCapabilities,
 } = require('./converter');
@@ -470,6 +471,20 @@ function registerIpcHandlers({ getMainWindow }) {
       ok: true,
       files: await normalizeSelectedPaths(inputPaths)
     };
+  });
+
+  registerHandler('media:thumbnail', async (payload) => {
+    const inputPath = typeof payload?.inputPath === 'string' ? payload.inputPath : null;
+    const detectedType = payload?.detectedType || null;
+    if (!inputPath) {
+      return { ok: false, dataUri: null };
+    }
+    const effectiveType = detectedType || (await probeMedia(inputPath)).detectedType;
+    if (!effectiveType) {
+      return { ok: false, dataUri: null };
+    }
+    const dataUri = await generateThumbnail(inputPath, effectiveType);
+    return { ok: Boolean(dataUri), dataUri };
   });
 
   registerHandler('media:estimateSize', async (payload) => {

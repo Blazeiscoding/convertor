@@ -15,7 +15,7 @@ function subscribe(channel, listener) {
 contextBridge.exposeInMainWorld('converter', {
   probeMedia: (inputPaths) => ipcRenderer.invoke('media:probe', { inputPaths }),
   estimateSize: (items) => ipcRenderer.invoke('media:estimateSize', { items }),
-  getThumbnail: (inputPath) => ipcRenderer.invoke('media:thumbnail', { inputPath }),
+  getThumbnail: (inputPath, detectedType) => ipcRenderer.invoke('media:thumbnail', { inputPath, detectedType }),
   startConversion: (payload) => ipcRenderer.invoke('convert:start', payload),
   cancelJob: (jobId) => ipcRenderer.invoke('convert:cancel', { jobId }),
   openFolderDialog: () => ipcRenderer.invoke('dialog:openFolder'),
