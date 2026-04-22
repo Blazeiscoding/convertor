@@ -2,8 +2,21 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useState } from 'react
 import DropZone from './components/DropZone';
 import FormatPicker from './components/FormatPicker';
 import JobList from './components/JobList';
+import OptionsPanel from './components/OptionsPanel';
 import QueueToolbar from './components/QueueToolbar';
 import Toast from './components/Toast';
+
+const DEFAULT_JOB_OPTIONS = {
+  quality: 'medium',
+  resize: { mode: 'none', keepAspect: true },
+  video: {
+    rateControl: 'quality',
+    fps: null,
+    audio: { mode: 'keep', bitrateKbps: 192 },
+    trim: null,
+    crop: null,
+  },
+};
 
 const IMAGE_FORMATS = ['jpg', 'png', 'webp', 'avif', 'gif', 'bmp', 'tiff'];
 const VIDEO_FORMATS = ['mp4', 'webm', 'mkv', 'mov', 'avi', 'gif'];
@@ -113,7 +126,8 @@ export default function App() {
     defaultOutputDir: null,
     maxConcurrent: 1,
     useGpu: true,
-    defaultFormats: { image: 'png', video: 'mp4' }
+    defaultFormats: { image: 'png', video: 'mp4' },
+    defaultOptions: DEFAULT_JOB_OPTIONS
   });
   const [gpuInfo, setGpuInfo] = useState({ available: false, vendor: null, label: 'Detecting...', detecting: true });
   const [selectedOutputDir, setSelectedOutputDir] = useState('');
@@ -446,6 +460,17 @@ export default function App() {
       await persistSettings({
         ...settings,
         maxConcurrent: Number(event.target.value)
+      });
+    } catch (error) {
+      pushToast('error', error.message);
+    }
+  }
+
+  async function handleDefaultOptionsChange(nextOptions) {
+    try {
+      await persistSettings({
+        ...settings,
+        defaultOptions: nextOptions
       });
     } catch (error) {
       pushToast('error', error.message);
@@ -902,6 +927,23 @@ export default function App() {
                       </p>
                     )}
                   </div>
+                </div>
+
+                <div className="mt-5 border-t pt-5" style={{ borderColor: 'var(--border)' }}>
+                  <div className="mb-3">
+                    <h3 className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>
+                      Encoding options
+                    </h3>
+                    <p className="mt-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                      Global defaults applied to every conversion. Individual files can override these later.
+                    </p>
+                  </div>
+                  <OptionsPanel
+                    value={settings.defaultOptions || DEFAULT_JOB_OPTIONS}
+                    onChange={handleDefaultOptionsChange}
+                    mediaType="both"
+                    showTrimCrop={false}
+                  />
                 </div>
               </div>
             </div>
